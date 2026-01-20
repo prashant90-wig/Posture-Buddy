@@ -1,4 +1,4 @@
- # Ref: https://learnopencv.com/building-a-body-posture-analysis-system-using-mediapipe/
+# Ref: https://learnopencv.com/building-a-body-posture-analysis-system-using-mediapipe/
 
 import cv2
 import time
@@ -7,7 +7,7 @@ from matplotlib import image
 import mediapipe as mp
 import numpy as np
 
-# Try to import pygame for sound, but make it optional
+# Try to import pygame for sound
 try:
     import pygame
     pygame.mixer.init()
@@ -128,18 +128,42 @@ def calibrate_posture(cap, pose):
     
     return neck_threshold, torso_threshold
 
+def play_sound(sound_type):
+    """Play a sound if pygame is available."""
+    if not SOUND_ENABLED:
+        return
+    
+    try:
+        if sound_type == 'celebrate':
+            # Try to load and play celebration sound
+            # Using relative path for cross-platform compatibility
+            sound_path = "D:/IMP Files/C Drive belongings/Dell/Desktop/python-project/posture_ai/assets/celebrate.wav"
+            
+            # Check if file exists
+            import os
+            if not os.path.exists(sound_path):
+                print(f"⚠️ Sound file not found: {sound_path}")
+                print("To enable celebration sounds, add 'celebrate.wav' to the assets folder")
+                return
+                
+            sound = pygame.mixer.Sound(sound_path)
+            sound.play()
+            print("🔊 Playing celebration sound!")
+    except Exception as e:
+        print(f"Could not play sound: {e}")
+
+
 def main():
     # Initialize
 
     buddy_images = {
-    "happy": cv2.imread("assets/happy.png", cv2.IMREAD_UNCHANGED),
-    "neutral": cv2.imread("assets/neutral.png", cv2.IMREAD_UNCHANGED),
-    "worried": cv2.imread("assets/worried.png", cv2.IMREAD_UNCHANGED),
-    "sad": cv2.imread("assets/sad.png", cv2.IMREAD_UNCHANGED),
-    "celebrate": cv2.imread("assets/celebrate.png", cv2.IMREAD_UNCHANGED)
+    "happy": cv2.imread("D:/IMP Files/C Drive belongings/Dell/Desktop/python-project/posture_ai/assets/happy.png", cv2.IMREAD_UNCHANGED),
+    "neutral": cv2.imread("D:/IMP Files/C Drive belongings/Dell/Desktop/python-project/posture_ai/assets/neutral.png", cv2.IMREAD_UNCHANGED),
+    "worried": cv2.imread("D:/IMP Files/C Drive belongings/Dell/Desktop/python-project/posture_ai/assets/worried.png", cv2.IMREAD_UNCHANGED),
+    "sad": cv2.imread("D:/IMP Files/C Drive belongings/Dell/Desktop/python-project/posture_ai/assets/sad.png", cv2.IMREAD_UNCHANGED),
+    "celebrate": cv2.imread("D:/IMP Files/C Drive belongings/Dell/Desktop/python-project/posture_ai/assets/celebrate.png", cv2.IMREAD_UNCHANGED)
 }
-
-
+    
     mp_pose_model = mp.solutions.pose
     pose = mp_pose_model.Pose()
     cap = cv2.VideoCapture(0)
@@ -156,6 +180,15 @@ def main():
     last_celebration_time = 0
     current_mood = 'neutral'
     celebration_counter = 0
+    
+    # Time-based tracking (for accurate timing at low fps)
+    last_posture_change_time = time.time()  # When posture status changed
+    good_posture_start_time = None  # When current good streak started
+    bad_posture_start_time = None   # When current bad streak started
+    
+    # Animation tracking
+    level_up_time = None  # When buddy last leveled up
+    streak_milestone_time = None  # When user hit a streak milestone
     
     # Colors
     green = (127, 255, 0)
@@ -206,27 +239,47 @@ def main():
         is_good_posture = (neck_inclination < neck_threshold and 
                           torso_inclination < torso_threshold)
         
-        # Update frames
+        # Update frames (kept for reference)
         if is_good_posture:
             good_frames += 1
             bad_frames = 0
+            # Track good streak start time
+            if good_posture_start_time is None:
+                good_posture_start_time = time.time()
+            bad_posture_start_time = None
         else:
             bad_frames += 1
             good_frames = 0
+            # Track bad streak start time
+            if bad_posture_start_time is None:
+                bad_posture_start_time = time.time()
+            good_posture_start_time = None
         
-        # Calculate times
-        good_time = (1 / fps) * good_frames
-        bad_time = (1 / fps) * bad_frames
+        # Calculate times using actual elapsed time (more accurate at low fps)
+        current_time = time.time()
+        if good_posture_start_time is not None:
+            good_time = current_time - good_posture_start_time
+        else:
+            good_time = 0
+            
+        if bad_posture_start_time is not None:
+            bad_time = current_time - bad_posture_start_time
+        else:
+            bad_time = 0
+        
+        # Update total good time accumulator
         total_good_time += (1 / fps) if is_good_posture else 0
         
-        # Determine buddy mood based on sustained posture
-        if good_time > 10:  # 10 seconds of good posture
-            current_mood = 'happy'
-        elif bad_time > 5 and bad_time < 15:  # 5-15 seconds of bad posture
-            current_mood = 'worried'
-        elif bad_time > 15:  # 15+ seconds of bad posture
+        # Determine buddy mood based on CURRENT sustained posture
+        if bad_time > 20:  # 20+ seconds of continuous bad posture
             current_mood = 'sad'
-        else:
+        elif bad_time > 15:  # 15-25 seconds of continuous bad posture
+            current_mood = 'worried'
+        elif bad_time > 0:  # Any bad posture (not sustained yet)
+            current_mood = 'neutral'
+        elif good_time > 10:  # 10+ seconds of continuous good posture
+            current_mood = 'happy'
+        else:  # Good posture but not sustained yet
             current_mood = 'neutral'
         
         # Check for celebration (every 5 minutes of total good posture)
@@ -243,6 +296,7 @@ def main():
             celebration_counter -= 1
         
         # Update buddy level based on total good time
+        previous_buddy_level = buddy_level
         if total_good_time >= BUDDY_LEVEL_THRESHOLDS[2]:
             buddy_level = 3
         elif total_good_time >= BUDDY_LEVEL_THRESHOLDS[1]:
@@ -250,27 +304,62 @@ def main():
         else:
             buddy_level = 1
         
+        # Track level-up animation
+        if buddy_level > previous_buddy_level:
+            level_up_time = time.time()
+            print(f"⭐ LEVEL UP! Buddy reached level {buddy_level}!")
+        
+        # Create and overlay buddy
         # Create and overlay buddy
         buddy_img = buddy_images[current_mood]
 
+        # Base size for buddy (much smaller!)
+        base_size = 150  # pixels
         scale = 0.8 + 0.1 * buddy_level
         scale *= 1.0 + 0.03 * m.sin(time.time() * 3)
+        
+        # Level-up pulse animation (lasts 1.5 seconds)
+        if level_up_time is not None:
+            time_since_levelup = time.time() - level_up_time
+            if time_since_levelup < 1.5:
+                # Pulsing effect: grows then shrinks
+                pulse = 1.0 + 0.2 * m.sin(time_since_levelup * 8)  # Oscillates rapidly
+                scale *= pulse
+            else:
+                level_up_time = None  # Animation done
+        
+        # Good streak pulse animation (subtle, continuous)
+        if is_good_posture:
+            scale *= 1.0 + 0.02 * m.sin(time.time() * 2)  # Subtle breathing effect
+
+        final_size = int(base_size * scale)
 
         buddy_img = cv2.resize(
             buddy_img,
-            None,
-            fx=scale,
-            fy=scale,
+            (final_size, final_size),
             interpolation=cv2.INTER_AREA
         )
 
-        overlay_png(image, buddy_img, w - 260, 40)
+        # Position buddy in top-right corner with proper spacing
+        buddy_x = w - final_size - 20  # 20 pixels from right edge
+        buddy_y = 20  # 20 pixels from top
+
+        overlay_png(image, buddy_img, buddy_x, buddy_y)
+        
+        # Draw halo effect during level-up (subtle glow)
+        if level_up_time is not None:
+            time_since_levelup = time.time() - level_up_time
+            if time_since_levelup < 1.5:
+                halo_radius = int(final_size / 2 + 10 + 5 * m.sin(time_since_levelup * 6))
+                cv2.circle(image, (buddy_x + final_size // 2, buddy_y + final_size // 2), 
+                          halo_radius, (100, 255, 255), 2)  # Yellow halo
         
         # Draw minimal UI elements
         # Buddy level indicator
         level_text = f"Buddy Level: {buddy_level}"
-        cv2.putText(image, level_text, (w - 250, 270), 
-                   cv2.FONT_HERSHEY_SIMPLEX, 0.7, white, 2)
+        level_y = 20 + final_size + 30  # Below the buddy image
+        cv2.putText(image, level_text, (w - final_size - 20, level_y), 
+        cv2.FONT_HERSHEY_SIMPLEX, 0.6, white, 2)
         
         # Progress to next level
         if buddy_level < 3:
