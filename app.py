@@ -1,4 +1,30 @@
-# Ref: https://learnopencv.com/building-a-body-posture-analysis-system-using-mediapipe/
+# ============ CONFIGURATION ============
+class PostureConfig:
+    # Buddy mood thresholds (in seconds)
+    MOOD_WORRIED_THRESHOLD = 15
+    MOOD_SAD_THRESHOLD = 20
+    MOOD_HAPPY_THRESHOLD = 10
+    
+    # Buddy level thresholds (in seconds)
+    LEVEL_2_THRESHOLD = 15
+    LEVEL_3_THRESHOLD = 60
+    
+    # Celebration interval (in seconds)
+    CELEBRATION_INTERVAL = 300  # 5 minutes
+    
+    # Calibration settings
+    CALIBRATION_DURATION = 5  # seconds
+    CALIBRATION_FPS = 30
+    
+    # Posture tolerance (added to baseline)
+    NECK_TOLERANCE = 10  # degrees
+    TORSO_TOLERANCE = 8  # degrees
+    
+    # Animation settings
+    BUDDY_BASE_SIZE = 150  # pixels
+    CELEBRATION_DURATION = 60  # frames
+
+
 
 import cv2
 import time
@@ -6,6 +32,13 @@ import math as m
 from matplotlib import image
 import mediapipe as mp
 import numpy as np
+import os
+
+# Get the directory where this script is located
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+ASSETS_DIR = os.path.join(SCRIPT_DIR, "assets")
+
+
 
 # Try to import pygame for sound
 try:
@@ -157,17 +190,17 @@ def main():
     # Initialize
 
     buddy_images = {
-    "happy": cv2.imread("D:/IMP Files/C Drive belongings/Dell/Desktop/python-project/posture_ai/assets/happy.png", cv2.IMREAD_UNCHANGED),
-    "neutral": cv2.imread("D:/IMP Files/C Drive belongings/Dell/Desktop/python-project/posture_ai/assets/neutral.png", cv2.IMREAD_UNCHANGED),
-    "worried": cv2.imread("D:/IMP Files/C Drive belongings/Dell/Desktop/python-project/posture_ai/assets/worried.png", cv2.IMREAD_UNCHANGED),
-    "sad": cv2.imread("D:/IMP Files/C Drive belongings/Dell/Desktop/python-project/posture_ai/assets/sad.png", cv2.IMREAD_UNCHANGED),
-    "celebrate": cv2.imread("D:/IMP Files/C Drive belongings/Dell/Desktop/python-project/posture_ai/assets/celebrate.png", cv2.IMREAD_UNCHANGED)
+    "happy": cv2.imread(os.path.join(ASSETS_DIR, "happy.png"), cv2.IMREAD_UNCHANGED),
+    "neutral": cv2.imread(os.path.join(ASSETS_DIR, "neutral.png"), cv2.IMREAD_UNCHANGED),
+    "worried": cv2.imread(os.path.join(ASSETS_DIR, "worried.png"), cv2.IMREAD_UNCHANGED),
+    "sad": cv2.imread(os.path.join(ASSETS_DIR, "sad.png"), cv2.IMREAD_UNCHANGED),
+    "celebrate": cv2.imread(os.path.join(ASSETS_DIR, "celebrate.png"), cv2.IMREAD_UNCHANGED)
 }
     
     mp_pose_model = mp.solutions.pose
     pose = mp_pose_model.Pose()
     cap = cv2.VideoCapture(0)
-    fps = int(cap.get(cv2.CAP_PROP_FPS)) or 30
+    fps = int(cap.get(cv2.CAP_PROP_FPS)) or 14
     
     # Calibration
     neck_threshold, torso_threshold = calibrate_posture(cap, pose)
@@ -182,6 +215,7 @@ def main():
     celebration_counter = 0
     
     # Time-based tracking (for accurate timing at low fps)
+
     last_posture_change_time = time.time()  # When posture status changed
     good_posture_start_time = None  # When current good streak started
     bad_posture_start_time = None   # When current bad streak started
@@ -271,21 +305,21 @@ def main():
         total_good_time += (1 / fps) if is_good_posture else 0
         
         # Determine buddy mood based on CURRENT sustained posture
-        if bad_time > 20:  # 20+ seconds of continuous bad posture
+        if bad_time > PostureConfig.MOOD_SAD_THRESHOLD:
             current_mood = 'sad'
-        elif bad_time > 15:  # 15-25 seconds of continuous bad posture
+        elif bad_time > PostureConfig.MOOD_WORRIED_THRESHOLD:
             current_mood = 'worried'
         elif bad_time > 0:  # Any bad posture (not sustained yet)
             current_mood = 'neutral'
-        elif good_time > 10:  # 10+ seconds of continuous good posture
+        elif good_time > PostureConfig.MOOD_HAPPY_THRESHOLD:  # 10+ seconds of continuous good posture
             current_mood = 'happy'
         else:  # Good posture but not sustained yet
             current_mood = 'neutral'
         
         # Check for celebration (every 5 minutes of total good posture)
-        if int(total_good_time) % CELEBRATION_INTERVAL == 0 and int(total_good_time) > last_celebration_time:
+        if int(total_good_time) % PostureConfig.CELEBRATION_INTERVAL == 0 and int(total_good_time) > last_celebration_time:
             current_mood = 'celebrate'
-            celebration_counter = 60  # Show celebration for 60 frames (~2 seconds)
+            celebration_counter = PostureConfig.CELEBRATION_DURATION  # Show celebration for 60 frames (~2 seconds)
             last_celebration_time = int(total_good_time)
             play_sound('celebrate')
             print(f"🎉 CELEBRATION! You've maintained good posture for {int(total_good_time/60)} minutes!")
@@ -307,9 +341,8 @@ def main():
         # Track level-up animation
         if buddy_level > previous_buddy_level:
             level_up_time = time.time()
-            print(f"⭐ LEVEL UP! Buddy reached level {buddy_level}!")
+            print(f"LEVEL UP! Buddy reached level {buddy_level}!")
         
-        # Create and overlay buddy
         # Create and overlay buddy
         buddy_img = buddy_images[current_mood]
 
